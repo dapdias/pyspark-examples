@@ -1,87 +1,117 @@
 from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame
 
+class OracleToFabricIngestor:
+    """
+    Classe utilitária para facilitar a ingestão de dados de um banco Oracle
+    (via Gateway ou Endpoint) para a camada Bronze do Microsoft Fabric.
+    """
+
+    def __init__(self, spark: SparkSession):
+        """
+        Inicializa o ingestor.
+
+        :param spark: Instância ativa da SparkSession.
+        """
+        self.spark = spark
+
+    def read_from_oracle(
+        self,
+        jdbc_url: str,
+        table_name: str,
+        user: str,
+        password: str,
+        fetchsize: str = "10000"
+    ) -> DataFrame:
+        """
+        Lê dados de uma tabela no Oracle e retorna um DataFrame PySpark.
+
+        :param jdbc_url: URL JDBC de conexão apontando para o Gateway/Endpoint.
+                         Exemplo: "jdbc:oracle:thin:@//<IP_DO_GATEWAY>:<PORTA>/<SERVICE_NAME>"
+        :param table_name: Nome da tabela no banco (ex: SCHEMA.TABELA).
+        :param user: Usuário do banco de dados.
+        :param password: Senha do banco de dados.
+        :param fetchsize: Tamanho do lote de leitura. Ajuda a melhorar a performance.
+        :return: DataFrame contendo os dados extraídos do Oracle.
+        """
+        print(f"-> Iniciando leitura da tabela {table_name} via Endpoint/Gateway...")
+
+        df = self.spark.read \
+            .format("jdbc") \
+            .option("url", jdbc_url) \
+            .option("dbtable", table_name) \
+            .option("user", user) \
+            .option("password", password) \
+            .option("driver", "oracle.jdbc.driver.OracleDriver") \
+            .option("fetchsize", fetchsize) \
+            .load()
+
+        print("-> Leitura concluída com sucesso.")
+        return df
+
+    def write_to_bronze_delta(
+        self,
+        df: DataFrame,
+        destination_path: str,
+        mode: str = "overwrite"
+    ):
+        """
+        Escreve um DataFrame no formato Delta, padrão para a camada Bronze do Fabric.
+
+        :param df: O DataFrame PySpark a ser salvo.
+        :param destination_path: Caminho no OneLake onde a tabela será salva.
+                                 Exemplo relativo: "Tables/minha_tabela_bronze"
+                                 Exemplo absoluto: "abfss://Workspace@onelake.dfs.fabric.microsoft.com/Lakehouse.Lakehouse/Tables/minha_tabela"
+        :param mode: "overwrite" (Carga Full) ou "append" (Carga Incremental).
+        """
+        print(f"-> Escrevendo dados no destino: {destination_path} (Modo: {mode})")
+
+        df.write \
+            .format("delta") \
+            .mode(mode) \
+            .save(destination_path)
+
+        print("-> Carga na camada Bronze finalizada com sucesso!")
+
+
+# =========================================================================
+# Exemplo de uso da Classe (Você pode copiar a classe acima para seus projetos)
+# =========================================================================
 def main():
-    # =========================================================================
-    # PASSO 1: Inicializar a SparkSession
-    # =========================================================================
-    # No Microsoft Fabric (Synapse Data Engineering), a SparkSession geralmente
-    # já está disponível como `spark`, mas instanciá-la assim é uma boa prática
-    # para rodar o script em outros ambientes ou testes locais.
+    # 1. Inicializa o Spark (No Fabric, 'spark' já está disponível nos notebooks)
     spark = SparkSession.builder \
-        .appName("OracleToFabricBronze") \
+        .appName("OracleToFabricIngestão") \
         .config("spark.jars.packages", "com.oracle.database.jdbc:ojdbc8:21.3.0.0") \
         .getOrCreate()
-        # O .config acima é para caso precise baixar o driver JDBC do Oracle.
-        # No Fabric, talvez você precise fazer o upload do .jar do Oracle nos
-        # "Environment settings" do workspace.
 
-    # =========================================================================
-    # PASSO 2: Configurar as variáveis de conexão com o banco Oracle
-    # =========================================================================
-    # Substitua pelas credenciais e dados reais do seu banco.
-    # É fortemente recomendado usar o Azure Key Vault para armazenar senhas
-    # e buscar os secrets via spark.conf ou mssparkutils (no Fabric).
-    oracle_url = "jdbc:oracle:thin:@//meu-servidor-oracle.com:1521/MEU_SERVICO"
-    oracle_user = "meu_usuario"
-    oracle_password = "minha_senha_secreta"
-    oracle_table = "SCHEMA.NOME_DA_TABELA"
+    # 2. Instancia nossa classe utilitária
+    ingestor = OracleToFabricIngestor(spark)
 
-    print(f"-> Conectando ao Oracle na tabela: {oracle_table}")
+    # 3. Define as variáveis (em produção, pegue essas credenciais do Azure Key Vault!)
+    # Como você está usando um Gateway/Endpoint, aponte a URL para o seu Gateway:
+    ENDPOINT_URL = "jdbc:oracle:thin:@//ip-do-seu-gateway-ou-endpoint:1521/SEU_SERVICO"
+    USER = "usuario_oracle"
+    PASSWORD = "senha_secreta"
+    TABLE = "SCHEMA.VENDAS"
 
-    # =========================================================================
-    # PASSO 3: Ler os dados do Oracle para um DataFrame PySpark (Copy Data)
-    # =========================================================================
-    # Usamos o formato "jdbc" para conectar no banco.
-    df_oracle = spark.read \
-        .format("jdbc") \
-        .option("url", oracle_url) \
-        .option("dbtable", oracle_table) \
-        .option("user", oracle_user) \
-        .option("password", oracle_password) \
-        .option("driver", "oracle.jdbc.driver.OracleDriver") \
-        .option("fetchsize", "10000") \
-        .load()
-        # Dica: "fetchsize" ajuda na performance lendo lotes de 10.000 linhas
-        # por vez, reduzindo as chamadas na rede.
-        # Dica 2: Se a tabela for muito grande, considere usar partitionColumn,
-        # lowerBound, upperBound e numPartitions para leitura em paralelo.
+    # 4. Lê os dados
+    df_vendas = ingestor.read_from_oracle(
+        jdbc_url=ENDPOINT_URL,
+        table_name=TABLE,
+        user=USER,
+        password=PASSWORD
+    )
 
-    # Exibe o esquema lido (as colunas e os tipos de dados)
-    # df_oracle.printSchema()
+    # (Opcional) Visualiza os primeiros registros ou esquema
+    # df_vendas.printSchema()
 
-    # =========================================================================
-    # PASSO 4: Preparar o caminho de destino na Camada Bronze (Microsoft Fabric)
-    # =========================================================================
-    # No Fabric, usamos o OneLake. O caminho geralmente começa com "abfss://"
-    # e aponta para a pasta Tables do seu Lakehouse.
-    # Exemplo: abfss://<Workspace_Name>@onelake.dfs.fabric.microsoft.com/<Lakehouse_Name>.Lakehouse/Tables/<Nome_da_Tabela>
-    # Em Notebooks do Fabric, você pode salvar direto como tabela gerenciada: "NOME_DA_TABELA_BRONZE"
-
-    lakehouse_table_path = "Tables/tabela_oracle_bronze"
-    # Usando caminho relativo que funciona no Fabric quando o Lakehouse padrão está atachado.
-
-    print("-> Escrevendo os dados na camada Bronze do Fabric em formato Delta...")
-
-    # =========================================================================
-    # PASSO 5: Salvar os dados na Camada Bronze (Formato Delta)
-    # =========================================================================
-    # A camada Bronze é um espelho ("raw" ou "copy data") dos dados de origem,
-    # por isso não fazemos transformações de negócios aqui (apenas salvamos o df_oracle).
-    # O Microsoft Fabric usa "delta" como formato padrão e nativo.
-
-    df_oracle.write \
-        .format("delta") \
-        .mode("overwrite") \
-        .save(lakehouse_table_path)
-
-    # .mode("overwrite"): Substitui todos os dados (Carga Full).
-    # Para cargas incrementais, use .mode("append") e certifique-se de filtrar
-    # no Oracle apenas os dados novos (ex: via query no option("dbtable")).
-
-    print("-> Carga finalizada com sucesso!")
-
-    # Para salvar como uma "Tabela Gerenciada" no Lakehouse do Fabric (para ver na UI):
-    # df_oracle.write.format("delta").mode("overwrite").saveAsTable("tabela_oracle_bronze")
+    # 5. Salva na camada Bronze no Fabric
+    DESTINATION_PATH = "Tables/vendas_bronze"
+    ingestor.write_to_bronze_delta(
+        df=df_vendas,
+        destination_path=DESTINATION_PATH,
+        mode="overwrite"  # Use "append" se for carga incremental
+    )
 
 if __name__ == "__main__":
     main()

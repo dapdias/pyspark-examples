@@ -61,12 +61,12 @@ Se os dados não estão em memória, eles estão em arquivos. O PySpark é excel
 - **Exemplo Prático:** Para ver isso funcionando, cheque `pyspark-explode-array-map.py` e `pyspark-explode-nested-array.py`. O `explode` pega, por exemplo, uma linha que tem um array `[A, B, C]` e cria três linhas no DataFrame, uma para `A`, uma para `B` e uma para `C`.
 
 ## 4. Integração com Microsoft Fabric / Data Lake (Exemplo Oracle -> Bronze)
-Para casos de ingestão de dados em arquiteturas Medallion modernas (como Microsoft Fabric, Databricks ou Synapse), criamos um template de referência rápida para um cenário "Copy Data".
+Para casos de ingestão de dados em arquiteturas Medallion modernas (como Microsoft Fabric, Databricks ou Synapse), criamos um template de referência rápida, Orientado a Objetos, para um cenário "Copy Data".
 - **Script de Template:** `pyspark-oracle-to-fabric-bronze.py`
 - **Como Funciona:**
-  1. Ele configura o Driver JDBC.
-  2. Conecta a um banco relacional **Oracle** e faz um `spark.read.format("jdbc")` na tabela.
-  3. Pega esse DataFrame bruto e imediatamente escreve no Microsoft Fabric / OneLake usando o formato **Delta** (`df.write.format("delta").save()`). Isso é a base para criar a **Camada Bronze** de um Data Lake.
+  1. O script contém uma classe chamada `OracleToFabricIngestor` que pode ser facilmente importada para novos projetos.
+  2. Fornece o método `read_from_oracle` onde você especifica a conexão JDBC (podendo apontar facilmente para um Gateway/Endpoint privado).
+  3. Fornece o método `write_to_bronze_delta` que pega o DataFrame extraído e o salva na camada Bronze usando o formato nativo **Delta**, ideal para o OneLake.
 
 ---
 
